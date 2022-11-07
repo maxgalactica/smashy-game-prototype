@@ -1,13 +1,19 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Events;
 using UnityEngine.InputSystem;
 
 [RequireComponent(typeof(Rigidbody))]
 public class MonsterController : MonoBehaviour
 {
+    // delegates
+    public delegate void TestPlayerDelegate();
+    public static TestPlayerDelegate boop;
+
     // input
-    private MonsterInputActions mnstrActionAsset;
+    private InputActionAsset mnstrActionAsset;
+    private InputActionMap playerMonster;
     private InputAction movement;
 
     //movement
@@ -24,32 +30,43 @@ public class MonsterController : MonoBehaviour
     private Camera playerCamRef;
     private Animator anim;
 
+    [SerializeField]
+    LayerMask groundLayer;
+
+    [SerializeField]
+    GameObject rotateVisuals;
+
     private void Awake()
     {
+        playerCamRef = GameObject.FindWithTag("MainCamera").GetComponent<Camera>();
+        //mnstrActionAsset = new MonsterInputActions();
         rb = this.GetComponent<Rigidbody>();
-        mnstrActionAsset = new MonsterInputActions();
         anim = this.GetComponentInChildren<Animator>();
+        mnstrActionAsset = this.GetComponent<PlayerInput>().actions;
+        playerMonster = mnstrActionAsset.FindActionMap("Player");
     }
 
     private void OnEnable()
     {
-        mnstrActionAsset.Player.Jump.performed += DoJump;
-        mnstrActionAsset.Player.PrimaryAttack.started += DoAttack;
-        movement = mnstrActionAsset.Player.Move;
-        mnstrActionAsset.Player.Enable();
+        playerMonster.FindAction("Jump").started += DoJump;
+        playerMonster.FindAction("PrimaryAttack").started += DoPrimaryAttack;
+        movement = playerMonster.FindAction("Move");
+        playerMonster.Enable();
     }
 
     private void OnDisable()
     {
-        mnstrActionAsset.Player.Jump.started -= DoJump;
-        mnstrActionAsset.Player.PrimaryAttack.started -= DoAttack;
-        mnstrActionAsset.Player.Disable();
+        playerMonster.FindAction("Jump").started -= DoJump;
+        playerMonster.FindAction("PrimaryAttack").started -= DoPrimaryAttack;
+        playerMonster.Disable();
     }
 
     private void FixedUpdate()
     {
-        forceDirection += movement.ReadValue<Vector2>().x * GetCameraRight(playerCamRef) * moveForce;
-        forceDirection += movement.ReadValue<Vector2>().y * GetCameraForward(playerCamRef) * moveForce;
+
+        forceDirection += new Vector3(movement.ReadValue<Vector2>().x, 0f, movement.ReadValue<Vector2>().y) * moveForce;
+
+        if (Keyboard.current.leftShiftKey.isPressed) forceDirection *= 1.75f;
 
         rb.AddForce(forceDirection, ForceMode.Impulse);
         forceDirection = Vector3.zero;
@@ -67,12 +84,24 @@ public class MonsterController : MonoBehaviour
 
     private void LookAt()
     {
-        Vector3 direction = rb.velocity;
+        Vector3 mousePos = Mouse.current.position.ReadValue();
+        mousePos.z = playerCamRef.farClipPlane;
+
+        Ray mouseRay = playerCamRef.ScreenPointToRay(mousePos);
+        Debug.DrawRay(mouseRay.origin, mouseRay.direction);
+        
+        Vector3 direction = Vector3.zero;
+
+        if(Physics.Raycast(mouseRay, out RaycastHit hit, playerCamRef.farClipPlane, groundLayer))
+        {
+            direction = hit.point - transform.position;
+        }
+
+        Debug.DrawRay(transform.position, direction - transform.position);
+
         direction.y = 0f;
 
-        if (movement.ReadValue<Vector2>().sqrMagnitude > 0.1f && direction.sqrMagnitude > 0.1f)
-            this.rb.rotation = Quaternion.LookRotation(direction, Vector3.up);
-        else rb.angularVelocity = Vector3.zero;
+        transform.forward = direction;
     }
 
     private Vector3 GetCameraForward(Camera p_Cam)
@@ -89,6 +118,14 @@ public class MonsterController : MonoBehaviour
         return right.normalized;
     }
 
+    private bool IsGrounded()
+    {
+        Ray ray = new Ray(this.transform.position + Vector3.up * 0.25f, Vector3.down);
+        if (Physics.Raycast(ray, out RaycastHit hit, 1.3f))
+            return true;
+        else return false;
+    }
+    #region ACTIONS
     void DoJump(InputAction.CallbackContext ctx)
     {
         if (IsGrounded())
@@ -97,19 +134,13 @@ public class MonsterController : MonoBehaviour
         }
     }
 
-    private bool IsGrounded()
-    {
-        Ray ray = new Ray(this.transform.position + Vector3.up * 0.25f, Vector3.down);
-        if (Physics.Raycast(ray, out RaycastHit hit, 1.3f))
-            return true;
-        else return false;
-    }
-
-    private void DoAttack(InputAction.CallbackContext ctx)
+    private void DoPrimaryAttack(InputAction.CallbackContext ctx)
     {
         anim.SetTrigger("PrimaryAttack");
     }
+    #endregion
 
+    #region DEBUG
     // debugging the raycast from IsGrounded()
     private void OnDrawGizmos()
     {
@@ -117,5 +148,13 @@ public class MonsterController : MonoBehaviour
         Gizmos.color = Color.red;
         Gizmos.DrawRay(this.transform.position + Vector3.up * 0.25f, Vector3.down * 1.3f);
     }
+
+    private void OnCollisionEnter(Collision col)
+    {
+        string objName = col.gameObject.name;
+        float impulseForce = col.GetContact(0).impulse.magnitude / Time.fixedDeltaTime;
+        Debug.Log($"HIT {objName} WITH {impulseForce:N0} FORCE");
+    }
+    #endregion
 }
 // Hi I love you dum dum <3 *pees on this to mark it as mine*
